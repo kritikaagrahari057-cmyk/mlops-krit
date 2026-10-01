@@ -1,0 +1,7 @@
+krit/
+mlflow.db
+mlruns/
+data/
+.git
+.github
+__pycache__/

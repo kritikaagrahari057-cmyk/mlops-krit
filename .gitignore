@@ -1,15 +1,15 @@
-dev/
+krit/
 .venv/
-__pycache__
+dev/
+__pycache__/
 *.pyc
 
 mlflow.db
 mlruns/
 mlartifacts/
+data/
+*.csv
 
 .env
-.csv
-.dist
-.vscode
+.vscode/
 .DS_Store
-
