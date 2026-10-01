@@ -3,6 +3,11 @@ name: Deploy to EC2
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
 
 env:
   AWS_REGION: ap-south-1
@@ -37,10 +42,26 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             export PATH=$PATH:/snap/bin
+            IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr.outputs.registry }}
-            docker pull ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            docker pull $IMAGE
+
             docker rm -f house-app || true
-            docker run -d --name house-app --restart unless-stopped -p 8000:8000 ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            sleep 10
-            curl -f http://localhost:8000/health
+            docker run -d --name house-app --restart unless-stopped -p 8000:8000 $IMAGE
+
+            for i in $(seq 1 12); do
+              if curl -fs http://localhost:8000/health; then
+                echo
+                echo "App is healthy"
+                docker image prune -af --filter "until=24h" || true
+                exit 0
+              fi
+              sleep 5
+            done
+
+            echo "Health check failed"
+            docker logs house-app
+            exit 1
