@@ -1,40 +1,46 @@
-name : Mock Deploy Pipeline (Test)
+name: Deploy to EC2
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: house-price-app
 
 jobs:
-    mock-build:
-      runs-on: ubuntu-latest
-      outputs:
-        image: ${{steps.build.outputs.image}}
-      steps:
-        - name: Checkout Code
-          uses: actions/checkout@v4
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: Mock - Configure AWS credentials
-          run: echo "aws-configuration Test"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-        - name: Mock - Login to Docker
-          run: echo "Docker login"
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-        - name: Mock - Build Docker Image
-          run : echo "Docker build"
+      - name: Build and push image
+        run: |
+          IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
 
-        - name: Mock - Push image to ECR
-          id : build
-          run : echo "Docker push"
-
-    mock-deploy:
-      needs: mock-build
-      runs-on: ubuntu-latest
-      steps:
-        - name: Mock - SSH into EC2 and redeploy
-          run: |
-            echo "docker pull house-preiction-model"
-            echo "docker stop"
-            echo "docker rm"
-            echo "docker run"
-            echo "Public ip : 56.7.7.7:8000"
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            export PATH=$PATH:/snap/bin
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr.outputs.registry }}
+            docker pull ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            docker rm -f house-app || true
+            docker run -d --name house-app --restart unless-stopped -p 8000:8000 ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            sleep 10
+            curl -f http://localhost:8000/health
